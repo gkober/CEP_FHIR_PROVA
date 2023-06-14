@@ -1,7 +1,6 @@
 package org.provarules.reference2.builtins;
 
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.math.BigDecimal;
 import java.util.List;
 
 import org.provarules.agent2.ProvaReagent;
@@ -9,92 +8,98 @@ import org.provarules.kernel2.ProvaConstant;
 import org.provarules.kernel2.ProvaDerivationNode;
 import org.provarules.kernel2.ProvaGoal;
 import org.provarules.kernel2.ProvaKnowledgeBase;
+import org.provarules.kernel2.ProvaList;
 import org.provarules.kernel2.ProvaLiteral;
 import org.provarules.kernel2.ProvaObject;
 import org.provarules.kernel2.ProvaRule;
 import org.provarules.kernel2.ProvaVariable;
 import org.provarules.kernel2.ProvaVariablePtr;
-import org.provarules.reference2.ProvaConstantImpl;
-import org.provarules.kernel2.ProvaList;
 
-import ca.uhn.fhir.context.FhirContext;
-import ca.uhn.fhir.rest.client.api.IGenericClient;
+public class FhirCompareBigDecimalValues extends ProvaBuiltinImpl {
 
-public class FhirConnectImpl extends ProvaBuiltinImpl {
-	FhirContext ctx = FhirContext.forR4();
-	IGenericClient client = null;
-
-	public FhirConnectImpl(ProvaKnowledgeBase kb) {
-		super(kb, "fhir_connect");
-	}
-	@Override
-	public int getArity() {
-		return 2;
+	public FhirCompareBigDecimalValues(ProvaKnowledgeBase kb) {
+		super(kb, "fhirCompareBigDecimalValues");
 	}
 
 	@Override
 	public boolean process(ProvaReagent prova, ProvaDerivationNode node, ProvaGoal goal, List<ProvaLiteral> newLiterals,
 			ProvaRule query) {
-		System.out.println("in FhirConnectImpl");
+		System.out.println("hitting the comparison of values");
 		
 		List<ProvaVariable> variables = query.getVariables();
         ProvaLiteral literal = goal.getGoal();
         ProvaList terms = literal.getTerms();
         ProvaObject[] data = terms.getFixed();
+        
+        
+		//read the values from the prova-file
+        //FirstValue is the observation
+        BigDecimal firstValue = (BigDecimal) extractValue(data, variables,0);
+        System.out.println(firstValue);
+        //SecondValue is the compareTo
+        Double secondValueString = (Double) extractValue(data, variables,1);
+        BigDecimal secondValue = new BigDecimal(secondValueString);
+        System.out.println(secondValue);
+        //3rd value is the direction <=>
+        String thirdValueString = (String) extractValue(data, variables,2);
+        System.out.println(thirdValueString);
 
-        if (data.length != 2) {
-            System.out.println("Syntax error - need two terms");
-            return false;
-        }else {
-        	System.out.println("two terms are included in the call, proceed");
-        }
-        //quickly checking the terms in prova
-        System.out.println(data[0].toString());
-        System.out.println(data[1].toString());
-        //the url is in data1; so the 2nd entry
-        ProvaObject data1 = resolve(data[1], variables);
-        String url = (String) ((ProvaConstant) data1).getObject();
-        this.client = this.ctx.newRestfulGenericClient(url);
-        
-        ProvaObject data0 = resolve(data[0], variables);
-        
-        //check if FHIR-Server is available
-        try {
-        	URL callingUrl = new URL(url);
-        	HttpURLConnection httpConnection = (HttpURLConnection) callingUrl.openConnection();
-        	//httpConnection.setRequestProperty("Accept", "application/json");
-        	
-        	System.out.println(httpConnection.getResponseCode() + httpConnection.getResponseMessage());
-        	httpConnection.disconnect();
-        	
-        	if(httpConnection.getResponseCode() == 400) {
-        		ctx = null;
-        		return false;
+		//compare and return
+        if(thirdValueString.equals("<")) {
+        	if(firstValue.compareTo(secondValue)<0) {
+        		return true;
         	}
-        
-        }catch(Exception e) {
-        	e.printStackTrace();
-        	ctx = null;
-        	return false;
         }
- 
-        try {
-        	//assign connection to variable
-        	 ProvaVariable cvar = (ProvaVariable) data0;
-        	 cvar.setAssigned(ProvaConstantImpl.create(this.client));
-        }catch(Exception e) {
-        	e.printStackTrace();
-        	ctx = null;
+        if(thirdValueString.equals(">")) {
+        	if(firstValue.compareTo(secondValue)>0) {
+        		return true;
+        	}
         }
-        System.out.println("returning true");
-		return true;
+        if(thirdValueString.equals("=")) {
+        	if(firstValue.compareTo(secondValue) == 0) {
+        		return true;
+        	}
+        }
+        if(thirdValueString.equals("<=")) {
+        	if(firstValue.compareTo(secondValue) <= 0) {
+        		return true;
+        	}
+        }
+        if(thirdValueString.equals(">=")) {
+        	if(firstValue.compareTo(secondValue) >= 1) {
+        		return true;
+        	}
+        }
+        if(thirdValueString.equals("!=")) {
+        	if(firstValue.compareTo(secondValue) != 0) {
+        		return true;
+        	}
+        }
+		System.out.println("Something went wrong ... maybe a wrong compare-value");
+		return false;
 	}
-	private ProvaObject resolve(ProvaObject o, List<ProvaVariable> variables) {
-        if (o instanceof ProvaVariablePtr) {
-            ProvaVariablePtr varPtr = (ProvaVariablePtr) o;
-            o = variables.get(varPtr.getIndex()).getRecursivelyAssigned();
-        }
-        return o;
-    }
-
+	//helper-methods for extracting data from the prova-files
+	static private <T> T extractValue(ProvaObject[] data, List<ProvaVariable> variables, int idx) {
+	    T retval;
+	    ProvaObject o = resolve(data[idx], variables);
+	    if (!(o instanceof ProvaConstant)) {
+	        System.out.println("Binding error. Term " + (idx + 1) + " must be constant.");
+	        return null;
+	    }
+	    try {
+	        retval = (T) ((ProvaConstant) o).getObject();
+	    } catch (ClassCastException cce) {
+	    	System.out.println("Binding error. Term " + (idx + 1) + " has wrong type.");
+	    	System.out.println("Exception: " +  cce);
+	        return null;
+	    }
+	    return retval;
+	}
+	static private ProvaObject resolve(ProvaObject o, List<ProvaVariable> variables) {
+	    if (o instanceof ProvaVariablePtr) {
+	        ProvaVariablePtr varPtr = (ProvaVariablePtr) o;
+	        o = variables.get(varPtr.getIndex()).getRecursivelyAssigned();
+	    }
+	    return o;
+	}
 }
